@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "./game/model",
+        "./game/view"
+    ]
+}
