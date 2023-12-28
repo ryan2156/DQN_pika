@@ -1,219 +1,92 @@
-import sys
-import pygame
-from pygame.locals import QUIT, KEYDOWN, KEYUP
-import time
+# 機器學習
 import torch
-import math
+import torch.nn as nn
+import torch.optim as optim
+from collections import deque
+import numpy as np
+
+# 遊戲的model
+import constants as const
+from game_model import *
 import random
 
-WIDTH = 800
-HEIGHT = 600
+# 繪圖
+import matplotlib.pyplot as plt
 
-BALL_MAX_SPEED = 12
+# 遊戲常數
+# 視窗
+WIDTH = const.WIDTH
+HEIGHT = const.HEIGHT
 
-class Character:
-    def __init__(self, x, y, radius, color):
-        self.x = x
-        self.y = y
-        self.vx = 0
-        
-        self.radius = radius
-        self.color = color
+# 地板高度
+FLOOR_HEIGHT = const.FLOOR_HEIGHT
 
-        # 建立 Pygame 的畫布，並將其初始化為指定顏色
-        self.rect = pygame.Surface((radius * 2, radius * 2)).fill(color)
-        
-    def draw(self, surface):
-        # 將畫布貼上到視窗上
-        pygame.draw.rect(surface, self.color, (self.x - self.radius, self.y - self.radius, self.radius, self.radius))
-    def update(self):
-        # 檢查是否碰撞邊界
-        if self.x < 100:
-            self.vx = 1
-        elif self.x > WIDTH:
-            self.vx = -1
-        # 更新角色的座標
-        self.x += self.vx
+# 角色大小
+CHARACTER_SIZE = const.CHARACTER_SIZE
 
-        
+# 球的係數
+BALL_SIZE = const.BALL_SIZE
+BALL_MAX_SPEED = const.BALL_MAX_SPEED
 
-class Ball:
-    def __init__(self, x, y, radius, color, vx=0, vy=0):
-        self.x = x
-        self.y = y
-        self.radius = radius
-        self.color = color
-        self.vx = vx  # 初始化 vx 為 0
-        self.vy = vy  # 初始化 vy 為 0
+class DQN(nn.Module):
+    def __init__(self, input_size, output_size):
+        super(DQN, self).__init__()
+        self.fc1 = nn.Linear(input_size, 128) # 輸入層
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, output_size) # 輸出層
 
-        # Rect屬性
-        self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius, self.radius * 2, self.radius * 2)
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
 
-        # 新增 character 屬性
-        self.character = None
+class DQNAgent:
+    def __init__(self, state_size, action_size):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.memory = deque(maxlen=2000)
+        self.gamma = 0.95  # discount factor
+        self.epsilon = 1.0  # exploration rate
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        self.model = DQN(state_size, action_size)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
 
-    def draw(self, surface):
-        # 使用 pygame.draw.circle() 方法繪製圓形
-        pygame.draw.circle(surface, self.color, (self.x, self.y), self.radius)
+    def remember(self, state, action, reward, next_state, done):
+        self.memory.append((state, action, reward, next_state, done))
 
-    def update(self):
-        # 更新球的座標
-        # 計算重力加速度
-        gravity = 0.4
-
-        # 更新球的速度
-        self.vy += gravity
-
-        
-        # 球速上限
-        if(self.vx > 0):
-            if(self.vx > BALL_MAX_SPEED):
-                self.vx = BALL_MAX_SPEED
-        elif(self.vx < 0):
-            if(abs(self.vx > BALL_MAX_SPEED)):
-                self.vx = - BALL_MAX_SPEED
-        if(self.vy > 0):
-            if(self.vy > BALL_MAX_SPEED):
-                self.vy = BALL_MAX_SPEED
-        elif(self.vy < 0):
-            if(abs(self.vy > BALL_MAX_SPEED)):
-                self.vx = - BALL_MAX_SPEED
-        
-        # 更新球的位置
-        self.x += self.vx
-        self.y += self.vy
-
-        # 檢查是否碰撞邊界
-        if self.x < 0 or self.x > WIDTH:
-            self.vx = -self.vx
-        if self.y < 0 or self.y > HEIGHT:
-            self.vy = -self.vy
-            
-
-        # # 檢查是否碰撞角色
-        # if self.collide(self.character):  # 檢查 character 是否存在
-        #     # 反彈球的方向
-        #     self.vx = -self.vx
-            
-    def angleCalculate(self, character: Character):
-        del_x = (character.x-self.x)
-        del_y = (character.y-self.y)
-        
-        if(not del_x or not del_y):
-            if(not del_x):
-                return [0, 1]
-            if(not del_y):
-                return [1, 0]
-        
-        hypo = (del_x**2 + del_y**2)**0.5
-        
-        sin, cos = del_x/hypo, del_y/hypo
-        
-        
-        return [sin, cos]
-        
-    def collide(self, character: Character):
-        # 檢查球與角色是否相交
-        if(self.character):
-            # 計算球與角色的中心距離
-            distance = math.sqrt((self.x - character.x)**2 + (self.y - character.y)**2)
-
-            # 檢查中心距離是否小於球與角色的半徑之和
-            if(distance <= self.radius + character.radius):
-                # 球與角色相交
-                return True
-            else:
-                # 球與角色不相交
-                return False
+    def act(self, state):
+        if random.uniform(0, 1) < self.epsilon:
+            return random.choice(range(self.action_size))
         else:
-            # 沒有角色
-            return False
+            state = torch.tensor(state, dtype=torch.float32).view(1, -1)
+            q_values = self.model(state).detach().numpy()
+            return np.argmax(q_values)
 
-class ScoreArea:
-    def __init__(self):
-        self.size = 50 * 2
-        self.score = 0
-        self.randomize_position()
+    def replay(self, batch_size):
+        if len(self.memory) < batch_size:
+            return
 
-    def randomize_position(self):
-        self.x = random.randint(100, 700)
-        self.y = random.randint(30, 200)
+        # 隨機抽取一批樣本
+        minibatch = random.sample(self.memory, batch_size)
 
-    def draw(self, surface):
-        pygame.draw.rect(surface, (255, 255, 255), (self.x, self.y, self.size, self.size))
+        # 獲取下一個狀態的 Q 值
+        state_batch = torch.tensor([x[0] for x in minibatch], dtype=torch.float32)
+        next_state_batch = torch.tensor([x[3] for x in minibatch], dtype=torch.float32)
+        next_q_values = self.model(next_state_batch).detach().numpy()
 
-    def check_collision(self, ball: Ball):
-        xBool = (self.x < ball.x+25 and ball.x+25 < self.x + self.size) or (self.x < ball.x-25 and ball.x-25 < self.x + self.size)
-        yBool = (self.y < ball.y+25 and ball.y+25 < self.y + self.size) or (self.y < ball.y-25 and ball.y-25 < self.y + self.size)
-        return xBool and yBool
+        # 計算目標 Q 值
+        for i in range(batch_size):
+            action = minibatch[i][1]
+            reward = minibatch[i][2]  # 從minibatch中獲取獎勵
+            target = reward
+            if not minibatch[i][4]:  # 檢查遊戲是否結束
+                # 如果遊戲沒有結束，則計算目標Q值
+                target = reward + self.gamma * np.max(next_q_values[i])
 
-    def increase_score(self):
-        self.score += 1
-        self.randomize_position()
-
-class Floor:
-    def __init__(self, width, height, color):
-        self.width = width
-        self.height = height
-        self.color = color
-
-    def draw(self, surface, y):
-        pygame.draw.rect(surface, self.color, (0, y, self.width, self.height))
-
-
-class Controller:
-    def __init__(self, character: Character, speed=5):
-        self.character = character
-        self.speed = speed
-
-    def handle_event(self, event):
-        if event.type == KEYDOWN:
-            if event.key == pygame.K_LEFT:
-                if(self.character.x < 100):
-                    self.stop()
-                else:
-                    self.move_left()
-            elif event.key == pygame.K_RIGHT:
-                if(self.character.x > WIDTH):
-                    self.stop()
-                else:
-                    self.move_right()
-        elif event.type == KEYUP:
-            if event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
-                self.stop()
-
-    def move_left(self):
-        self.character.vx = -self.speed*1.5
-
-    def move_right(self):
-        self.character.vx = self.speed*1.5
-
-    def stop(self):
-        self.character.vx = 0
-
-    def update(self):
-        self.character.update()
-
-        if self.character.x < 0 or self.character.x > WIDTH:
-            self.character.vx = 0
-            self.character.x = max(0, min(self.character.x, WIDTH))
-            
-class Window:
-    def __init__(self):
-        self.width = 800
-        self.height = 600
-
-        self.surface = pygame.display.set_mode((self.width, self.height))
-        self.floor = Floor(800, 150, (0, 0, 255))  # 新增地板物件
-        
-    def draw(self, character: Character, ball: Ball):
-        self.surface.fill((0, 0, 0))
-
-        self.floor.draw(self.surface, 450)  # 繪製地板
-        character.draw(self.surface)
-        ball.draw(self.surface)
-
-        pygame.display.update()
+            # 更新Q表
+            self.model.update_parameters(state_batch[i], action, target)
 
 def check_collide(ball: Ball, character: Character):
     # 檢查球是否碰撞角色
@@ -221,7 +94,7 @@ def check_collide(ball: Ball, character: Character):
 
 def reset_game(character: Character, ball: Ball, score: ScoreArea):
     # 重新開始遊戲，將球的位置和速度重新設定為初始值
-    ball.x = 400
+    ball.x = WIDTH//2
     ball.y = 100
     ball.vx = 0
     ball.vy = 0
@@ -236,12 +109,18 @@ def main():
 
     window = Window()  # 建立視窗物件
 
-    ball = Ball(400, 100, 50, (0, 255, 0))  # 建立球物件
-    character = Character(450, 450, 100, (255, 255, 0))  # 建立角色物件
-    controller = Controller(character)
+    ball = Ball(400, 100, BALL_SIZE, (0, 255, 0))  # 建立球物件
+    character = Character(450, 450, CHARACTER_SIZE, (255, 255, 0))  # 建立角色物件
+    controller = Controller(character) # 控制
+    score_area = ScoreArea() # 得分區域
+    ball.character = character # 球要根據角色判斷
     
-    score_area = ScoreArea()
-    ball.character = character
+    # 每局得分列表
+    scores = []
+    
+    state_size = 6  # 修改為你的狀態大小
+    action_size = 3  # 修改為你的動作大小
+    agent = DQNAgent(state_size, action_size)
     while True:  # 遊戲迴圈
         time.sleep(0.016)
         for event in pygame.event.get():  # 處理事件
@@ -253,6 +132,17 @@ def main():
                     reset_game(character, ball)
             controller.handle_event(event)
 
+        # 使用DQNAgent選擇動作
+        state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]  # 修改為你的狀態表示
+        action = agent.act(state)
+        
+        # 將動作應用到遊戲中
+        if action == 0:
+            controller.move_left()
+        elif action == 1:
+            controller.move_right()
+        # 如果 action == 2，則表示停止，無需額外處理
+
         ball.update()  # 更新球的狀態
         character.update()  # 更新角色的狀態（如果有）
         
@@ -263,6 +153,15 @@ def main():
             # 反彈球的方向
             ball.vx += -character.vx * 0.05
             ball.vy = -ball.vy * 1.18
+
+        # 將當前狀態、動作、獎勵和下一個狀態儲存到DQNAgent的記憶體中
+        next_state = [character.x, character.vx, ball.x, ball.vx]  # 修改為你的狀態表示
+        reward = 1 if check_collide(ball, character) else 0  # 設定獎勵
+        done = ball.y > HEIGHT
+        agent.remember(state, action, reward, next_state, done)
+
+        # 使用DQNAgent進行回放學習
+        agent.replay(32)
 
         window.draw(character, ball)  # 繪製畫面
         
@@ -281,8 +180,15 @@ def main():
         
         # 檢查是否需要重新開始遊戲
         if ball.y > HEIGHT - 150:
+            scores.append(score_area.score)
+            # 繪製圖表
+            plt.plot(scores)
+            plt.xlabel("Game number")
+            plt.ylabel("Score")
+            plt.show()
             reset_game(character, ball, score_area)
-            print(score_area.score)
+        
+        
 
 if __name__ == "__main__":
     main()
