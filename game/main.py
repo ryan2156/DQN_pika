@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import deque
 import numpy as np
+import torch.nn.functional as F
 
 # 遊戲的model
 import constants as const
@@ -31,13 +32,20 @@ BALL_MAX_SPEED = const.BALL_MAX_SPEED
 class DQN(nn.Module):
     def __init__(self, input_size, output_size):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(input_size, 128) # 輸入層
+        self.input_size = input_size
+        self.fc1 = nn.Linear(input_size, 128, dtype=torch.float) # 輸入層
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, output_size) # 輸出層
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
+        #print("0Input size:", x.size())
+        x = x.view(-1, self.input_size) 
+        x = F.elu(self.fc1(x))
+        #print("1Input size:", x.size())
+        # print(x)
+        x = F.elu(self.fc2(x))
+        #print("2Input size:", x.size())
+        #print(x)
         x = self.fc3(x)
         return x
 
@@ -57,36 +65,88 @@ class DQNAgent:
         self.memory.append((state, action, reward, next_state, done))
 
     def act(self, state):
-        if random.uniform(0, 1) < self.epsilon:
-            return random.choice(range(self.action_size))
+        state = torch.tensor(state, dtype=torch.float32) # 將list 轉為tensor
+        state = state.view(1, -1)
+        action = self.model.forward(state)
+        
+        self.epsilon = self.epsilon * self.epsilon_decay
+        if self.epsilon < self.epsilon_min:
+            self.epsilon = self.epsilon_min
+
+        if random.uniform(0, 0.5) < self.epsilon:
+            action = random.choice(range(self.action_size))
         else:
             state = torch.tensor(state, dtype=torch.float32).view(1, -1)
             q_values = self.model(state).detach().numpy()
-            return np.argmax(q_values)
+            return np.argmax(q_values[0])
+        return action
 
     def replay(self, batch_size):
         if len(self.memory) < batch_size:
             return
-
+    
         # 隨機抽取一批樣本
         minibatch = random.sample(self.memory, batch_size)
 
         # 獲取下一個狀態的 Q 值
-        state_batch = torch.tensor([x[0] for x in minibatch], dtype=torch.float32)
-        next_state_batch = torch.tensor([x[3] for x in minibatch], dtype=torch.float32)
-        next_q_values = self.model(next_state_batch).detach().numpy()
+        next_state_batch = [x[3] for x in minibatch]
+        next_state_batch = torch.tensor(next_state_batch, dtype=torch.float32)
+        next_state_batch = next_state_batch.view(-1, 6)
 
         # 計算目標 Q 值
         for i in range(batch_size):
             action = minibatch[i][1]
-            reward = minibatch[i][2]  # 從minibatch中獲取獎勵
-            target = reward
-            if not minibatch[i][4]:  # 檢查遊戲是否結束
-                # 如果遊戲沒有結束，則計算目標Q值
-                target = reward + self.gamma * np.max(next_q_values[i])
+            reward = minibatch[i][2] 
+            done = minibatch[i][4] 
+            
 
-            # 更新Q表
-            self.model.update_parameters(state_batch[i], action, target)
+            target = reward
+            if not done:
+                target = reward + self.gamma * np.max(self.model(next_state_batch[i]).detach().numpy())
+
+            current_q_values = self.model(minibatch[i][0])
+            target_q_values = current_q_values.clone().detach()
+            target_q_values[0, action] = target
+            loss = nn.MSELoss()(current_q_values, target_q_values)
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+
+    #def replay(self, batch_size):
+    #    if len(self.memory) < batch_size:
+    #        return
+#
+    #    # 隨機抽取一批樣本
+    #    minibatch = random.sample(self.memory, batch_size)
+#
+    #    # 獲取下一個狀態的 Q 值
+    #    #state_batch = torch.tensor([x[0] for x in minibatch], dtype=torch.float32)
+    #    state_batch = torch.from_numpy(np.array([x[0] for x in minibatch], dtype=np.float32))
+    #    state_batch = state_batch.view(-1, self.state_size)
+    #    next_state_batch = torch.tensor([x[3] for x in minibatch], dtype=torch.float32)
+    #    next_q_values = self.model(next_state_batch).detach().numpy()
+#
+#
+    #    # 計算目標 Q 值
+    #    for i in range(batch_size):
+    #        action = minibatch[i][1]
+    #        reward = minibatch[i][2]  # 從minibatch中獲取獎勵
+    #        target = reward
+    #        if not minibatch[i][4]:  # 檢查遊戲是否結束
+    #            # 如果遊戲沒有結束，則計算目標Q值
+    #            target = reward + self.gamma * np.max(next_q_values[i])
+#
+    #        current_q_values = self.model(state_batch[i]).unsqueeze(0)
+    #        target_q_values = current_q_values.clone().detach()
+    #        target_q_values[0, action] = target
+#
+    #        loss = nn.MSELoss()(current_q_values, target_q_values)
+    #        self.optimizer.zero_grad()
+    #        loss.backward()
+    #        self.optimizer.step()
 
 def check_collide(ball: Ball, character: Character):
     # 檢查球是否碰撞角色
@@ -133,7 +193,10 @@ def main():
             controller.handle_event(event)
 
         # 使用DQNAgent選擇動作
-        state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]  # 修改為你的狀態表示
+        #state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]  # 修改為你的狀態表示
+        #action = agent.act(state)
+        state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]
+        state = state = torch.tensor(state, dtype=torch.float32).view(1, -1)
         action = agent.act(state)
         
         # 將動作應用到遊戲中
@@ -155,7 +218,7 @@ def main():
             ball.vy = -ball.vy * 1.18
 
         # 將當前狀態、動作、獎勵和下一個狀態儲存到DQNAgent的記憶體中
-        next_state = [character.x, character.vx, ball.x, ball.vx]  # 修改為你的狀態表示
+        next_state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]  # 修改為你的狀態表示
         reward = 1 if check_collide(ball, character) else 0  # 設定獎勵
         done = ball.y > HEIGHT
         agent.remember(state, action, reward, next_state, done)
@@ -168,7 +231,7 @@ def main():
         if score_area.check_collision(ball) and addmode == 0:
             addmode = 1
             score_area.increase_score()
-            print(score_area.score)
+            # print(score_area.score)
             #score_area.draw(window.surface)  # Draw the score area after updating the score
         elif score_area.check_collision(ball) and addmode == 1:
             pass
