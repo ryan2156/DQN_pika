@@ -12,10 +12,13 @@ from game_model import *
 import random
 
 # 繪圖
+import matplotlib
+matplotlib.use('TkAgg',force=True)
 import matplotlib.pyplot as plt
 
 # 紀錄檔
 import pickle
+import os
 
 # 遊戲常數
 # 視窗
@@ -95,7 +98,7 @@ class DQNAgent:
         # 獲取下一個狀態的 Q 值
         next_state_batch = [x[3] for x in minibatch]
         next_state_batch = torch.tensor(next_state_batch, dtype=torch.float32)
-        next_state_batch = next_state_batch.view(-1, 6)
+        next_state_batch = next_state_batch.view(-1, 8)
 
         # 計算目標 Q 值
         for i in range(batch_size):
@@ -133,9 +136,6 @@ def reset_game(character: Character, ball: Ball, score: ScoreArea):
     character.x = 450
     character.vx = 0
     score.score = 0
-    
-
-
 
 def main():
     
@@ -151,15 +151,17 @@ def main():
     ball.character = character # 球要根據角色判斷
     
 
-    state_size = 6  # 修改為你的狀態大小
-    action_size = 3  # 修改為你的動作大小
+    state_size = 8  # 修改為你的狀態大小
+    action_size = 3  # 修改為你的動作大小 #left right pass
     agent = DQNAgent(state_size, action_size)
     finished_list = [] # 每完成50個訓練就加一筆
-    epochs = 10
+    epochs = 1000
     
     for epoch in range(epochs):
         reset_game(character, ball, score_area)
         print("epoch: ", epoch+1)
+        bSdis = 800
+        cBdis = 800
         while True:  # 遊戲迴圈
             time.sleep(0.016)
             for event in pygame.event.get():  # 處理事件
@@ -172,7 +174,7 @@ def main():
                 controller.handle_event(event)
 
             # 使用DQNAgent選擇動作
-            state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]
+            state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy, score_area.x, score_area.y]
             state = state = torch.tensor(state, dtype=torch.float32).view(1, -1)
             action = agent.act(state)
             agent.times += 1
@@ -182,7 +184,9 @@ def main():
                 controller.move_left()
             elif action == 1:
                 controller.move_right()
-            # 如果 action == 2，則表示停止，無需額外處理
+            elif action == 2:
+                pass
+            # 如果 action == 2，則表示不處理動作，無需額外處理
 
             ball.update()  # 更新球的狀態
             character.update()  # 更新角色的狀態（如果有）
@@ -196,20 +200,36 @@ def main():
                 ball.vy = -ball.vy * 1.18
 
             # 將當前狀態、動作、獎勵和下一個狀態儲存到DQNAgent的記憶體中
-            next_state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy]  # 修改為你的狀態表示
+            next_state = [character.x, character.vx, ball.x, ball.vx, ball.y, ball.vy, score_area.x, score_area.y]  # 修改為你的狀態表示
             done = 0
             # reward 設定
+            reward = 0
             if(check_collide(ball, character)):  # 球與角色碰撞
-                reward = 1
-            elif(score_area.check_collision(ball)): # 球進到得分區域
-                reward = 5
-                score_area.score += 1
-            elif(ball.y > HEIGHT-150): # 球落地
-                reward = -1
-                done = ball.y > HEIGHT-150
+                print(f"接球 reward + 200")
+                reward += 200
+            if abs(character.x - ball.x) <= 200:
+                print(f"範圍內 {abs(character.x - ball.x)}")
+                reward = int((abs(character.x - ball.x) * -0.1) + 21)
             else:
-                reward = 0
-            
+            #if abs(character.x - ball.x) >= 200:
+                print(f"遠離 {abs(character.x - ball.x)}")
+            #    reward = int((abs(character.x - ball.x) * -0.1) + 5)
+            if abs(score_area.x - ball.x) < bSdis:
+                print(f"球靠近得分區 {abs(score_area.x - ball.x)}")
+                reward += 3
+            if abs(character.x - ball.x) < cBdis:
+                print(f"角色靠近球 {abs(score_area.x - ball.x)}")
+                reward += 3
+            if(score_area.check_collision(ball) and addmode == 0): # 球進到得分區域
+                print(f"球得分")
+                reward += 10000
+                #score_area.score += 1
+            if(ball.y > HEIGHT-150): # 球落地
+                reward = -100000
+                done = ball.y > HEIGHT-150
+            print(f"reward={reward}")
+            bSdis = abs(score_area.x - ball.x)
+            cBdis = abs(character.x - ball.x)
             agent.remember(state, action, reward, next_state, done)
 
             # 使用DQNAgent進行回放學習
@@ -221,6 +241,7 @@ def main():
             if score_area.check_collision(ball) and addmode == 0:
                 addmode = 1
                 score_area.increase_score()
+                print(f"目前得分:{score_area.score}")
                 # print(score_area.score)
                 #score_area.draw(window.surface)  # Draw the score area after updating the score
             elif score_area.check_collision(ball) and addmode == 1:
@@ -239,6 +260,7 @@ def main():
         print("探索率：" , agent.epsilon, "損失：", agent.gamma)
         print()
     
+    os.chdir("C:/Users/ian93/Desktop/pikaDQN/DQN_pika/DQN")
     torch.save({
         "model": agent.model.state_dict(),
         "times": agent.times,
