@@ -156,7 +156,7 @@ def main():
     action_size = 3  # 修改為你的動作大小 #left right pass
     agent = DQNAgent(state_size, action_size)
     finished_list = [] # 每完成50個訓練就加一筆
-    epochs = 20000
+    epochs = 100
     
     for epoch in range(epochs):
         reset_game(character, ball, score_area)
@@ -206,29 +206,29 @@ def main():
             # reward 設定
             reward = 0
             if(check_collide(ball, character)):  # 球與角色碰撞
-                print(f"接球 reward + 200")
+                print(f"[{epoch}]={score_area.score}= 接球 reward + 200")
                 reward += 200
             if abs(character.x - ball.x) <= 200:
-                print(f"範圍內 {abs(character.x - ball.x)}")
+                print(f"[{epoch}]={score_area.score}= 範圍內 {abs(character.x - ball.x)}")
                 reward = int((abs(character.x - ball.x) * -0.1) + 21)
             else:
             #if abs(character.x - ball.x) >= 200:
-                print(f"遠離 {abs(character.x - ball.x)}")
+                print(f"[{epoch}]={score_area.score}= 遠離 {abs(character.x - ball.x)}")
             #    reward = int((abs(character.x - ball.x) * -0.1) + 5)
             if abs(score_area.x - ball.x) < bSdis:
-                print(f"球靠近得分區 {abs(score_area.x - ball.x)}")
+                print(f"[{epoch}]={score_area.score}= 球靠近得分區 {abs(score_area.x - ball.x)}")
                 reward += 3
             if abs(character.x - ball.x) < cBdis:
-                print(f"角色靠近球 {abs(score_area.x - ball.x)}")
+                print(f"[{epoch}]={score_area.score}= 角色靠近球 {abs(score_area.x - ball.x)}")
                 reward += 3
             if(score_area.check_collision(ball) and addmode == 0): # 球進到得分區域
-                print(f"球得分")
+                print(f"[{epoch}]={score_area.score}= 球得分")
                 reward += 10000
                 #score_area.score += 1
             if(ball.y > HEIGHT-150): # 球落地
                 reward = -100000
                 done = ball.y > HEIGHT-150
-            print(f"reward={reward}")
+            print(f"[{epoch}]={score_area.score}= reward={reward}")
             bSdis = abs(score_area.x - ball.x)
             cBdis = abs(character.x - ball.x)
             agent.remember(state, action, reward, next_state, done)
