@@ -67,6 +67,7 @@ class DQNAgent:
         self.model = DQN(state_size, action_size)
         self.times = 0 # 紀錄次數
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
@@ -115,12 +116,12 @@ class DQNAgent:
             target_q_values = current_q_values.clone().detach()
             target_q_values[0, action] = target
             loss = nn.MSELoss()(current_q_values, target_q_values)
-
+            #print(f"L O S S {loss}")
 
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
-
 
 def check_collide(ball: Ball, character: Character):
     # 檢查球是否碰撞角色
@@ -155,7 +156,7 @@ def main():
     action_size = 3  # 修改為你的動作大小 #left right pass
     agent = DQNAgent(state_size, action_size)
     finished_list = [] # 每完成50個訓練就加一筆
-    epochs = 1000
+    epochs = 20000
     
     for epoch in range(epochs):
         reset_game(character, ball, score_area)
